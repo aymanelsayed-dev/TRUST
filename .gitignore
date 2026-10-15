@@ -1,0 +1,35 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Secrets and local config
+.env
+*.env
+appsettings.Development.json
+secrets.json
+
+# .NET
+bin/
+obj/
+*.user
+.vs/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+.packages
+*.iml
+.idea/
+android/local.properties
+ios/Pods/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
