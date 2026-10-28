@@ -50,3 +50,9 @@ Never commit directly to `main`.
 ## API contracts
 
 The JSON contracts between services are fixed in `README.md`. Changing a field name or type needs an issue and agreement from the owners on both sides before the change is merged.
+## API Contract Rules
+
+1. ممنوع إضافة أو تعديل أو حذف endpoint أو حقل أو enum من غير تعديل `docs/api-contract.yaml` الأول.
+2. تعديل العقد يتم عن طريق Pull Request، ولازم يوافق عليه مسؤول الـ Frontend ومسؤول الـ Backend.
+3. أي تعديل بيرفع رقم `version` في العقد (patch للتصحيحات، minor للإضافات، major لو هيكسر الشغل الحالي).
+4. الـ JSON keys بصيغة camelCase والـ enums بنفس حالة الحروف المكتوبة في العقد.
