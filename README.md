@@ -23,7 +23,7 @@ Detect  ->  Score  ->  Enforce  ->  Record  ->  Explain
 ```
 Flutter app
     |
-ASP.NET Core API (Identity + JWT, role enforcement, orchestration)
+ASP.NET Core API (Firebase token validation, role enforcement, orchestration)
     |-- POST /api/v1/predictions  -> AI Service       (FastAPI, port 8001)
     |-- POST /api/v1/assessments  -> Security Service (FastAPI, port 8002)
     |-- Audit Log + results       -> SQL Server
@@ -51,7 +51,8 @@ run_tests.py         Runs all test suites
 > The repository currently also contains `gateway/`, `run_all.py`, and `demo.py`. These are a temporary stand-in for the backend and will be removed once the ASP.NET Core API replaces them.
 
 ## Services
-
+> These service endpoints are internal (Backend to AI/Security services only).
+> The Frontend must use only the endpoints in docs/api-contract.yaml. 
 ### AI Service: phishing URL detection
 
 `POST /api/v1/predictions`
