@@ -185,3 +185,7 @@ The interface follows a dark "Cyber Command" design system and adapts to the sig
 - The security test scripts were exercised against a mock backend, not yet against the real ASP.NET Core API.
 - The risk thresholds, the strategy mapping, and the 0.65 uncertainty cut-off are team decisions that should be reviewed and confirmed.
 - SHAP explanations are planned; the current `explanation` field is a fixed text.
+## API Contract
+
+العقد الرسمي بين Frontend و Backend: [`docs/api-contract.yaml`](docs/api-contract.yaml)
+أي اسم endpoint أو حقل أو enum لازم يطابق العقد حرفياً.
