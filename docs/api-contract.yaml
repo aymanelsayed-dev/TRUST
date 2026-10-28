@@ -1,0 +1,460 @@
+openapi: 3.0.3
+info:
+  title: TRUST-AI API Contract
+  version: 1.0.0
+  description: |
+    العقد الرسمي بين Frontend (Flutter) و Backend (ASP.NET Core).
+    أي اسم هنا إجباري على الطرفين. أي تعديل يتم بالاتفاق وبرفع version.
+
+    ## قواعد عامة (إجبارية)
+    1. كل JSON keys بصيغة **camelCase**.
+    2. كل enum values مكتوبة بالظبط زي ما هي هنا (حساسة لحالة الحروف).
+    3. التواريخ ISO 8601 بتوقيت UTC، مثال: `2026-10-28T14:30:00Z`.
+    4. كل الـ IDs نوعها string (UUID)، ماعدا `uid` بتاع المستخدم فهو Firebase UID.
+    5. الحقول اللي ممكن تكون فاضية بتيجي `null` (مش بتتشال من الـ response).
+    6. كل الـ endpoints تحت `/api/v1` ومحتاجة `Authorization: Bearer <Firebase ID Token>`.
+    7. الـ Backend هو اللي بيطبق الـ masking والصلاحيات. الـ Frontend ما يخبّيش ولا يعمل masking بنفسه، بس يعرض اللي جاله.
+    8. أي error بيرجع بالشكل الموحد `ErrorResponse`.
+
+    ## Authentication (Firebase)
+    - الـ Frontend يعمل login عن طريق Firebase Auth ويجيب ID Token.
+    - يبعته في كل request: `Authorization: Bearer <idToken>`.
+    - الـ Backend يتحقق من الـ token (Firebase Admin SDK أو JWT validation
+      بـ issuer = `https://securetoken.google.com/<FIREBASE_PROJECT_ID>`
+      و audience = `<FIREBASE_PROJECT_ID>`).
+    - الـ Role مخزن في SQL Server مربوط بـ `uid`، وأول مرة المستخدم يدخل بيتعمله
+      سجل تلقائي بدور `Guest`.
+    - الـ Frontend يعرف دور المستخدم من `GET /me` (مش من الـ token).
+    - الـ token بيتجدد كل ساعة، الـ Frontend مسؤول عن `getIdToken()` قبل كل طلب.
+servers:
+  - url: http://localhost:5000
+    description: Local backend
+tags:
+  - name: Auth
+  - name: Scans
+  - name: Dashboard
+  - name: AuditLogs
+  - name: Users
+  - name: Incidents
+
+security:
+  - firebaseBearer: []
+
+paths:
+  /api/v1/me:
+    get:
+      tags: [Auth]
+      summary: بيانات المستخدم الحالي ودوره
+      operationId: getMe
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/scans:
+    post:
+      tags: [Scans]
+      summary: فحص رابط (Backend ينادي AI Service ثم Security Service ويسجل Audit)
+      description: متاح لكل الأدوار. حقول الـ risk بترجع `null` للـ Guest.
+      operationId: createScan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateScanRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScanResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    get:
+      tags: [Scans]
+      summary: قائمة التقارير (الفحوصات السابقة)
+      operationId: listScans
+      parameters:
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/pageSize' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ScanStatus' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScanPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/scans/{id}:
+    get:
+      tags: [Scans]
+      summary: تفاصيل فحص واحد
+      operationId: getScan
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScanResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/dashboard/summary:
+    get:
+      tags: [Dashboard]
+      summary: أرقام الداشبورد
+      description: حقول `byRiskLevel` بترجع `null` للـ Guest.
+      operationId: getDashboardSummary
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/audit-logs:
+    get:
+      tags: [AuditLogs]
+      summary: سجل التدقيق (Analyst و SecurityAdmin فقط)
+      operationId: listAuditLogs
+      parameters:
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/pageSize' }
+        - { name: action, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditLogPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/users:
+    get:
+      tags: [Users]
+      summary: قائمة المستخدمين (SecurityAdmin فقط)
+      operationId: listUsers
+      parameters:
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/pageSize' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/users/{uid}/role:
+    patch:
+      tags: [Users]
+      summary: تغيير دور مستخدم (SecurityAdmin فقط)
+      operationId: updateUserRole
+      parameters:
+        - { name: uid, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateRoleRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/incidents:
+    get:
+      tags: [Incidents]
+      summary: قائمة الحوادث (SecurityAdmin فقط)
+      operationId: listIncidents
+      parameters:
+        - { $ref: '#/components/parameters/page' }
+        - { $ref: '#/components/parameters/pageSize' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/IncidentStatus' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IncidentPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/incidents/{id}:
+    patch:
+      tags: [Incidents]
+      summary: تحديث حالة حادثة (SecurityAdmin فقط)
+      operationId: updateIncident
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateIncidentRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Incident' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  securitySchemes:
+    firebaseBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: Firebase ID Token (JWT)
+
+  parameters:
+    page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    pageSize:
+      name: pageSize
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+
+  responses:
+    BadRequest:
+      description: بيانات غير صالحة
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Unauthorized:
+      description: token مفقود أو منتهي
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Forbidden:
+      description: الدور لا يملك الصلاحية (شاشة 403)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: غير موجود
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ServiceUnavailable:
+      description: AI Service أو Security Service مش شغال
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  schemas:
+    # ---------- Enums ----------
+    Role:
+      type: string
+      enum: [Guest, Analyst, SecurityAdmin]
+    Label:
+      type: string
+      enum: [phishing, legitimate]
+    ScanStatus:
+      type: string
+      description: threat = phishing بثقة كافية، safe = legitimate بثقة كافية، uncertain = الثقة أقل من 0.65 (مراجعة يدوية)
+      enum: [threat, safe, uncertain]
+    RiskLevel:
+      type: string
+      enum: [Critical, High, Medium, Low]
+    TreatmentStrategy:
+      type: string
+      enum: [Terminate, Treat, Transfer, Tolerate]
+    IncidentStatus:
+      type: string
+      enum: [open, investigating, resolved]
+
+    # ---------- Errors ----------
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: كود ثابت للـ Frontend يعتمد عليه (مش الرسالة)
+          enum: [VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, SERVICE_UNAVAILABLE, INTERNAL_ERROR]
+        message: { type: string }
+        details:
+          type: object
+          nullable: true
+          additionalProperties: true
+          example: { field: "url", reason: "must be a valid http/https URL" }
+
+    # ---------- Users ----------
+    User:
+      type: object
+      required: [uid, email, role, createdAt]
+      properties:
+        uid: { type: string, description: Firebase UID }
+        email: { type: string }
+        displayName: { type: string, nullable: true }
+        role: { $ref: '#/components/schemas/Role' }
+        createdAt: { type: string, format: date-time }
+    UpdateRoleRequest:
+      type: object
+      required: [role]
+      properties:
+        role: { $ref: '#/components/schemas/Role' }
+    UserPage:
+      allOf:
+        - { $ref: '#/components/schemas/PageMeta' }
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/User' }
+
+    # ---------- Scans ----------
+    CreateScanRequest:
+      type: object
+      required: [inputType, payload]
+      properties:
+        inputType: { type: string, enum: [url], description: حاليا url فقط }
+        payload: { type: string, example: "http://example.com/login" }
+    ScanResult:
+      type: object
+      required: [id, inputType, payload, label, confidence, status, explanation, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        inputType: { type: string, enum: [url] }
+        payload: { type: string }
+        label: { $ref: '#/components/schemas/Label' }
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: احتمال الـ label المتوقع
+        status: { $ref: '#/components/schemas/ScanStatus' }
+        explanation: { type: string }
+        riskScore:
+          type: number
+          nullable: true
+          minimum: 0
+          maximum: 10
+          description: "null للـ Guest"
+        riskLevel:
+          nullable: true
+          allOf: [ { $ref: '#/components/schemas/RiskLevel' } ]
+        treatmentStrategy:
+          nullable: true
+          allOf: [ { $ref: '#/components/schemas/TreatmentStrategy' } ]
+        createdBy: { type: string, description: uid }
+        createdAt: { type: string, format: date-time }
+    ScanPage:
+      allOf:
+        - { $ref: '#/components/schemas/PageMeta' }
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/ScanResult' }
+
+    # ---------- Dashboard ----------
+    DashboardSummary:
+      type: object
+      required: [totalScans, threatCount, safeCount, uncertainCount]
+      properties:
+        totalScans: { type: integer }
+        threatCount: { type: integer }
+        safeCount: { type: integer }
+        uncertainCount: { type: integer }
+        byRiskLevel:
+          type: object
+          nullable: true
+          description: "null للـ Guest"
+          properties:
+            Critical: { type: integer }
+            High: { type: integer }
+            Medium: { type: integer }
+            Low: { type: integer }
+
+    # ---------- Audit ----------
+    AuditLogEntry:
+      type: object
+      required: [id, timestamp, action, outcome]
+      properties:
+        id: { type: string, format: uuid }
+        timestamp: { type: string, format: date-time }
+        actorUid: { type: string, nullable: true }
+        actorEmail: { type: string, nullable: true, description: "masked حسب الدور" }
+        action:
+          type: string
+          example: scan.created
+          description: "صيغة resource.verb. أمثلة: auth.login, scan.created, user.roleChanged, incident.updated, access.denied"
+        resource: { type: string, nullable: true }
+        outcome: { type: string, enum: [success, failure] }
+        ipAddress: { type: string, nullable: true }
+    AuditLogPage:
+      allOf:
+        - { $ref: '#/components/schemas/PageMeta' }
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/AuditLogEntry' }
+
+    # ---------- Incidents ----------
+    Incident:
+      type: object
+      required: [id, scanId, title, severity, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        scanId: { type: string, format: uuid }
+        title: { type: string }
+        severity: { $ref: '#/components/schemas/RiskLevel' }
+        status: { $ref: '#/components/schemas/IncidentStatus' }
+        assignedToUid: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time, nullable: true }
+    UpdateIncidentRequest:
+      type: object
+      properties:
+        status: { $ref: '#/components/schemas/IncidentStatus' }
+        assignedToUid: { type: string, nullable: true }
+    IncidentPage:
+      allOf:
+        - { $ref: '#/components/schemas/PageMeta' }
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/Incident' }
+
+    # ---------- Pagination ----------
+    PageMeta:
+      type: object
+      required: [page, pageSize, totalCount]
+      properties:
+        page: { type: integer }
+        pageSize: { type: integer }
+        totalCount: { type: integer }
