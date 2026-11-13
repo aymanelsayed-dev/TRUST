@@ -24,7 +24,7 @@ Detect  ->  Score  ->  Enforce  ->  Record  ->  Explain
 Flutter app (Frontend)  --\
                            >--  ASP.NET Core API (Backend)
 Security (tests, tools) --/       |  exposes /api/v1/* endpoints (docs/api-contract.yaml)
-                                  |  Firebase token validation, role enforcement,
+                                  |  authentication, role enforcement,
                                   |  risk scoring, masking, audit logging
                                   |
                                   |-- consumes: POST /api/v1/predictions <- AI Service (FastAPI, port 8001)
