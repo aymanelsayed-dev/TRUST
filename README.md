@@ -21,29 +21,31 @@ Detect  ->  Score  ->  Enforce  ->  Record  ->  Explain
 ## Architecture
 
 ```
-Flutter app
-    |
-ASP.NET Core API (Firebase token validation, role enforcement, orchestration)
-    |-- POST /api/v1/predictions  -> AI Service       (FastAPI, port 8001)
-    |-- POST /api/v1/assessments  -> Security Service (FastAPI, port 8002)
-    |-- Audit Log + results       -> SQL Server
+Flutter app (Frontend)  --\
+                           >--  ASP.NET Core API (Backend)
+Security (tests, tools) --/       |  exposes /api/v1/* endpoints (docs/api-contract.yaml)
+                                  |  Firebase token validation, role enforcement,
+                                  |  risk scoring, masking, audit logging
+                                  |
+                                  |-- consumes: POST /api/v1/predictions <- AI Service (FastAPI, port 8001)
+                                  |-- Audit Log + results                 -> SQL Server
 ```
 
-The backend is the single orchestrator. It calls the AI Service, passes the result to the Security Service, writes the audit entry, and returns the final result to the app based on the user's role.
+The backend is the single entry point. It exposes the `/api/v1` endpoints that the Frontend and the Security team call, and the only external service it consumes is the AI Service (FastAPI). For each scan it takes the prediction from the AI Service, applies the risk rules and role-based masking defined by the Security team, writes the audit entry, and returns the final result based on the user's role.
 
 | Component | Technology | Responsibility |
 |---|---|---|
 | Mobile / Web app | Flutter (Dart) | Role-adaptive UI, reports, alerts |
-| Main API | ASP.NET Core, Entity Framework Core | Auth, roles, orchestration, database, audit logging |
-| AI Service | Python, FastAPI, scikit-learn | Phishing URL detection with a confidence score |
-| Security Service | Python, FastAPI | Risk scoring, treatment strategy, privacy masking |
+| Main API | ASP.NET Core, Entity Framework Core | Endpoints for Frontend and Security, auth, roles, consuming the AI Service, risk scoring, masking, database, audit logging |
+| AI Service | Python, FastAPI, scikit-learn | Phishing URL detection with a confidence score (consumed by the backend only) |
+| Security (rules, docs, tests) | Python, Markdown | Risk rules and masking spec, security docs, API security tests that call the backend endpoints |
 | Database | SQL Server | Users, roles, audit logs, detection results |
 
 ## Repository layout
 
 ```
 ai_service/          Phishing URL model + FastAPI service        (port 8001)
-security_service/    Risk Engine, masking, security docs/tests   (port 8002)
+security_service/    Risk rules + masking reference, security docs/tests/tools
 requirements.txt     Python dependencies for both services
 run_tests.py         Runs all test suites
 ```
@@ -51,8 +53,9 @@ run_tests.py         Runs all test suites
 > The repository currently also contains `gateway/`, `run_all.py`, and `demo.py`. These are a temporary stand-in for the backend and will be removed once the ASP.NET Core API replaces them.
 
 ## Services
-> These service endpoints are internal (Backend to AI/Security services only).
-> The Frontend must use only the endpoints in docs/api-contract.yaml. 
+> The AI Service endpoint is internal (Backend to AI Service only).
+> The Frontend and the Security team must use only the Backend endpoints in `docs/api-contract.yaml`.
+
 ### AI Service: phishing URL detection
 
 `POST /api/v1/predictions`
@@ -78,9 +81,11 @@ Useful scripts (run from inside `ai_service/`):
 | `train.py` | Retrain the model and sanity-check it on URLs outside the dataset |
 | `compare_models.py` | Compare Random Forest, Gradient Boosting, Decision Tree, and Logistic Regression with 5-fold cross-validation |
 
-### Security Service: risk engine and privacy masking
+### Security: risk engine and privacy masking
 
-`POST /api/v1/assessments`
+The risk scoring and masking rules below are defined by the Security team and applied inside the backend. `security_service/` holds the reference implementation (`risk_engine.py`, `masking.py`) that the backend follows, and the Frontend and Security team reach the results only through the backend endpoints (for example `POST /api/v1/scans`), never by calling a separate security service.
+
+Reference request and response shape of the risk engine (`POST /api/v1/assessments` in the reference implementation):
 
 ```json
 // request
@@ -104,7 +109,7 @@ Useful scripts (run from inside `ai_service/`):
 
 **Uncertain Outcome:** when AI confidence is below `0.65`, the result is marked for manual review. The threshold is `UNCERTAIN_BELOW` in `security_service/risk_engine.py`.
 
-`POST /api/v1/mask` applies privacy masking by viewer role to emails, phone numbers, and card numbers:
+Privacy masking (`POST /api/v1/mask` in the reference implementation) is applied by viewer role to emails, phone numbers, and card numbers:
 
 | Role | What they see |
 |---|---|
@@ -120,7 +125,7 @@ Useful scripts (run from inside `ai_service/`):
 | `security_service/docs/audit_log_policy.md` | What is logged, what is never logged, retention, alert rules |
 | `security_service/docs/stride_threat_model.md` | STRIDE threat model |
 | `security_service/docs/owasp_checklist.md` | OWASP checklist |
-| `security_service/security_tests/` | API security test scripts (run against the real backend) |
+| `security_service/security_tests/` | API security test scripts (call the backend `/api/v1` endpoints) |
 | `security_service/tools/audit_log_analyzer.py` | Flags suspicious patterns in an audit log CSV |
 
 ## Roles and permissions
@@ -145,28 +150,22 @@ pip install -r requirements.txt
 python run_tests.py            # should end with ALL PASSED
 ```
 
-Run the services (each from its own folder, in separate terminals):
+Run the AI Service (the backend consumes it):
 
 ```bash
 cd ai_service
 uvicorn app:app --port 8001
-
-cd security_service
-uvicorn app:app --port 8002
 ```
 
-Interactive API docs (Swagger): `http://localhost:8001/docs` and `http://localhost:8002/docs`. Health checks: `/health` on each service.
+Interactive API docs (Swagger): `http://localhost:8001/docs`. Health check: `/health`.
+
+The Frontend and the Security tests connect to the backend (`http://localhost:5000`), not to the AI Service.
 
 ### Backend configuration
 
 ```
 ExternalServices__AiServiceUrl=http://localhost:8001/
-ExternalServices__SecurityServiceUrl=http://localhost:8002/
 ```
-
-## UI/UX design
-
-The interface follows a dark "Cyber Command" design system and adapts to the signed-in role. The design covers onboarding and authentication, role-specific dashboards, URL scanning and results (threat, safe, uncertain), reports, audit log, user and incident administration, profile and settings, and a 403 screen.
 
 ## Team
 
@@ -177,7 +176,6 @@ The interface follows a dark "Cyber Command" design system and adapts to the sig
 | Backend | 1 |
 | AI | 1 |
 | Data Analysis | 1 |
-| UI/UX Design | 1 |
 
 ## Known limitations
 
