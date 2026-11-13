@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: TRUST-AI API Contract
-  version: 1.0.0
+  version: 2.0.0
   description: |
     العقد الرسمي بين Frontend (Flutter) و Backend (ASP.NET Core).
     أي اسم هنا إجباري على الطرفين. أي تعديل يتم بالاتفاق وبرفع version.
@@ -10,22 +10,20 @@ info:
     1. كل JSON keys بصيغة **camelCase**.
     2. كل enum values مكتوبة بالظبط زي ما هي هنا (حساسة لحالة الحروف).
     3. التواريخ ISO 8601 بتوقيت UTC، مثال: `2026-10-28T14:30:00Z`.
-    4. كل الـ IDs نوعها string (UUID)، ماعدا `uid` بتاع المستخدم فهو Firebase UID.
+    4. كل الـ IDs نوعها string (UUID)، وده ينطبق على `uid` بتاع المستخدم كمان (الـ Backend هو اللي بيولّده).
     5. الحقول اللي ممكن تكون فاضية بتيجي `null` (مش بتتشال من الـ response).
-    6. كل الـ endpoints تحت `/api/v1` ومحتاجة `Authorization: Bearer <Firebase ID Token>`.
+    6. كل الـ endpoints تحت `/api/v1` ومحتاجة `Authorization: Bearer <accessToken>`، ماعدا endpoints الـ Auth العامة (login, request-account, refresh, forgot-password, verify-identity, reset-password).
     7. الـ Backend هو اللي بيطبق الـ masking والصلاحيات. الـ Frontend ما يخبّيش ولا يعمل masking بنفسه، بس يعرض اللي جاله.
     8. أي error بيرجع بالشكل الموحد `ErrorResponse`.
 
-    ## Authentication (Firebase)
-    - الـ Frontend يعمل login عن طريق Firebase Auth ويجيب ID Token.
-    - يبعته في كل request: `Authorization: Bearer <idToken>`.
-    - الـ Backend يتحقق من الـ token (Firebase Admin SDK أو JWT validation
-      بـ issuer = `https://securetoken.google.com/<FIREBASE_PROJECT_ID>`
-      و audience = `<FIREBASE_PROJECT_ID>`).
-    - الـ Role مخزن في SQL Server مربوط بـ `uid`، وأول مرة المستخدم يدخل بيتعمله
-      سجل تلقائي بدور `Guest`.
+    ## Authentication (JWT من الـ Backend)
+    - الـ Frontend يعمل login عن طريق `POST /auth/login` ويستلم `accessToken` و `refreshToken`.
+    - يبعت الـ `accessToken` في كل request: `Authorization: Bearer <accessToken>`.
+    - الـ Backend هو اللي بيوقّع الـ JWT وبيتحقق منه. مفتاح التوقيع من environment variables أو user-secrets، ومش في الريبو أبداً.
+    - الـ Role مخزن في SQL Server مربوط بـ `uid`، وأي حساب جديد بيتعمله دور `Guest`.
     - الـ Frontend يعرف دور المستخدم من `GET /me` (مش من الـ token).
-    - الـ token بيتجدد كل ساعة، الـ Frontend مسؤول عن `getIdToken()` قبل كل طلب.
+    - الـ `accessToken` عمره قصير (`expiresIn` بالثواني بيرجع في الـ response). لما أي request يرجع `401` الـ Frontend يستدعي `POST /auth/refresh` مرة واحدة، ولو فشل يرجّع المستخدم لشاشة تسجيل الدخول.
+    - الباسوردات بتتخزن hashed ومبتتسجلش في أي log أو audit.
 servers:
   - url: http://localhost:5000
     description: Local backend
@@ -38,9 +36,119 @@ tags:
   - name: Incidents
 
 security:
-  - firebaseBearer: []
+  - bearerAuth: []
 
 paths:
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: تسجيل الدخول (endpoint عام، مفيهوش token)
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/auth/request-account:
+    post:
+      tags: [Auth]
+      summary: طلب إنشاء حساب جديد بدور Guest (endpoint عام)
+      operationId: requestAccount
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RequestAccountRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: تجديد الـ accessToken (endpoint عام)
+      operationId: refreshToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: طلب كود لاسترجاع الباسورد (endpoint عام)
+      description: بيرجع `204` دايماً حتى لو الإيميل مش موجود، عشان ما نكشفش مين عنده حساب.
+      operationId: forgotPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ForgotPasswordRequest' }
+      responses:
+        '204': { description: No Content }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/v1/auth/verify-identity:
+    post:
+      tags: [Auth]
+      summary: التحقق من الكود واستلام resetToken (endpoint عام)
+      operationId: verifyIdentity
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerifyIdentityRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VerifyIdentityResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: تعيين باسورد جديد باستخدام resetToken (endpoint عام)
+      operationId: resetPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResetPasswordRequest' }
+      responses:
+        '204': { description: No Content }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /api/v1/me:
     get:
       tags: [Auth]
@@ -57,7 +165,7 @@ paths:
   /api/v1/scans:
     post:
       tags: [Scans]
-      summary: فحص رابط (Backend ينادي AI Service ثم Security Service ويسجل Audit)
+      summary: فحص رابط (Backend ينادي AI Service ويحسب الـ risk ويسجل Audit)
       description: متاح لكل الأدوار. حقول الـ risk بترجع `null` للـ Guest.
       operationId: createScan
       requestBody:
@@ -165,7 +273,7 @@ paths:
       summary: تغيير دور مستخدم (SecurityAdmin فقط)
       operationId: updateUserRole
       parameters:
-        - { name: uid, in: path, required: true, schema: { type: string } }
+        - { name: uid, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
         required: true
         content:
@@ -226,10 +334,10 @@ paths:
 
 components:
   securitySchemes:
-    firebaseBearer:
+    bearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: Firebase ID Token (JWT)
+      bearerFormat: JWT
 
   parameters:
     page:
@@ -263,7 +371,7 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
     ServiceUnavailable:
-      description: AI Service أو Security Service مش شغال
+      description: AI Service مش شغال
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -306,12 +414,62 @@ components:
           additionalProperties: true
           example: { field: "url", reason: "must be a valid http/https URL" }
 
+    # ---------- Auth ----------
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+    RequestAccountRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password, minLength: 8 }
+        displayName: { type: string, nullable: true }
+    AuthResponse:
+      type: object
+      required: [accessToken, refreshToken, expiresIn, user]
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        expiresIn: { type: integer, description: عمر الـ accessToken بالثواني }
+        user: { $ref: '#/components/schemas/User' }
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string }
+    ForgotPasswordRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+    VerifyIdentityRequest:
+      type: object
+      required: [email, code]
+      properties:
+        email: { type: string, format: email }
+        code: { type: string }
+    VerifyIdentityResponse:
+      type: object
+      required: [resetToken]
+      properties:
+        resetToken: { type: string, description: صالح لاستخدام واحد ولمدة قصيرة }
+    ResetPasswordRequest:
+      type: object
+      required: [resetToken, newPassword]
+      properties:
+        resetToken: { type: string }
+        newPassword: { type: string, format: password, minLength: 8 }
+
     # ---------- Users ----------
     User:
       type: object
       required: [uid, email, role, createdAt]
       properties:
-        uid: { type: string, description: Firebase UID }
+        uid: { type: string, format: uuid }
         email: { type: string }
         displayName: { type: string, nullable: true }
         role: { $ref: '#/components/schemas/Role' }
@@ -365,7 +523,7 @@ components:
         treatmentStrategy:
           nullable: true
           allOf: [ { $ref: '#/components/schemas/TreatmentStrategy' } ]
-        createdBy: { type: string, description: uid }
+        createdBy: { type: string, format: uuid, description: uid }
         createdAt: { type: string, format: date-time }
     ScanPage:
       allOf:
@@ -403,7 +561,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         timestamp: { type: string, format: date-time }
-        actorUid: { type: string, nullable: true }
+        actorUid: { type: string, format: uuid, nullable: true }
         actorEmail: { type: string, nullable: true, description: "masked حسب الدور" }
         action:
           type: string
@@ -432,14 +590,14 @@ components:
         title: { type: string }
         severity: { $ref: '#/components/schemas/RiskLevel' }
         status: { $ref: '#/components/schemas/IncidentStatus' }
-        assignedToUid: { type: string, nullable: true }
+        assignedToUid: { type: string, format: uuid, nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time, nullable: true }
     UpdateIncidentRequest:
       type: object
       properties:
         status: { $ref: '#/components/schemas/IncidentStatus' }
-        assignedToUid: { type: string, nullable: true }
+        assignedToUid: { type: string, format: uuid, nullable: true }
     IncidentPage:
       allOf:
         - { $ref: '#/components/schemas/PageMeta' }
