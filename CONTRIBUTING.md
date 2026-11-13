@@ -33,6 +33,7 @@ Never commit directly to `main`.
 ## Security rules (this is a security project)
 
 - No passwords, JWT signing keys, API keys, or connection strings in the repository, ever. Use environment variables, `.env` files (ignored by git), or ASP.NET user-secrets.
+- Authentication is handled by the backend itself (there is no external identity provider). Passwords are never stored or logged in clear text, and every auth change gets a Security review.
 - If a secret is committed by mistake, tell the team immediately and rotate it. Deleting the commit is not enough.
 - Do not log passwords, tokens, or raw uploaded content (see `security_service/docs/audit_log_policy.md`).
 
@@ -49,10 +50,12 @@ Never commit directly to `main`.
 
 ## API contracts
 
-The JSON contracts between services are fixed in `README.md`. Changing a field name or type needs an issue and agreement from the owners on both sides before the change is merged.
+The Frontend and Security team talk to the backend only through the endpoints in `docs/api-contract.yaml`. The only service the backend consumes is the AI Service, whose request and response JSON is fixed in `README.md`. Changing a field name or type needs an issue and agreement from the owners on both sides before the change is merged.
+
 ## API Contract Rules
 
 1. ممنوع إضافة أو تعديل أو حذف endpoint أو حقل أو enum من غير تعديل `docs/api-contract.yaml` الأول.
 2. تعديل العقد يتم عن طريق Pull Request، ولازم يوافق عليه مسؤول الـ Frontend ومسؤول الـ Backend.
 3. أي تعديل بيرفع رقم `version` في العقد (patch للتصحيحات، minor للإضافات، major لو هيكسر الشغل الحالي).
 4. الـ JSON keys بصيغة camelCase والـ enums بنفس حالة الحروف المكتوبة في العقد.
+5. بعد حذف Firebase، الـ auth بقى على الـ Backend، فأي endpoint للـ auth لازم يتكتب في `docs/api-contract.yaml` الأول قبل ما الـ Backend أو الـ Frontend يبدأوا فيه.
