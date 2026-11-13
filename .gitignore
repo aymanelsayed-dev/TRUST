@@ -1,35 +1,28 @@
-# Python
-venv/
-.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
-.ipynb_checkpoints/
-
 # Secrets and local config
 .env
 *.env
+.env.*
 appsettings.Development.json
 secrets.json
+*.pem
+*.key
+*.pfx
 
 # .NET
 bin/
 obj/
 *.user
 .vs/
+TestResults/
+*.mdf
+*.ldf
 
-# Flutter / Dart
-.dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
-build/
-.packages
-*.iml
-.idea/
-android/local.properties
-ios/Pods/
+# Flutter / Android signing
+key.properties
+*.jks
+*.keystore
+.gradle/
 
-# OS / editor
-.DS_Store
-Thumbs.db
-.vscode/
+# Python
+.mypy_cache/
+*.log
